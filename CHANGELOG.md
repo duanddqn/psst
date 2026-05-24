@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] — sandboxed unlock fix
+
+### Fixed
+- Fixed Linux sandboxed unlocks where `PSST_PASSWORD` is injected after process startup by tools such as `nono`. `psst` now falls back to reading `/proc/self/environ` when Bun's `process.env` snapshot does not contain `PSST_PASSWORD`, and tries environment credentials before keychain access.
+
+Note: this is a Linux-specific fallback for sandbox/supervisor setups that inject credentials into the process environment after startup; normal `process.env` handling remains unchanged.
+
 ## [0.7.0] — pluggable storage backends
 
 ### Added
