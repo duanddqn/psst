@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import { EXIT_ERROR, EXIT_USER_ERROR } from "../utils/exit-codes.js";
 import type { OutputOptions } from "../utils/output.js";
 import { Vault } from "../vault/vault.js";
+import { RestApiBackend } from "../vault/restapi-backend.js";
 import { getUnlockedVault } from "./common.js";
 
 async function rmItem(name: string, options: OutputOptions): Promise<void> {
@@ -30,6 +31,18 @@ async function rmItem(name: string, options: OutputOptions): Promise<void> {
 async function rmVault(envName: string, options: OutputOptions): Promise<void> {
   const isGlobal = envName.startsWith("@");
   const env = isGlobal ? envName.slice(1) : envName;
+
+  if (options.restUrl) {
+    const backend = new RestApiBackend({ url: options.restUrl.url, apiKey: options.restUrl.apiKey });
+    await backend.deleteVault(env);
+    if (options.json) {
+      console.log(JSON.stringify({ success: true, env }));
+    } else if (!options.quiet) {
+      console.log(chalk.green("✓"), `Vault "${env}" removed from proxy.`);
+    }
+    return;
+  }
+
   const vaultPath = Vault.findVaultPath({ global: isGlobal || options.global, env });
 
   if (!vaultPath) {

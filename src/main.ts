@@ -18,10 +18,12 @@ import { set } from "./commands/set.js";
 import { tag, untag } from "./commands/tag.js";
 import { passwd } from "./commands/passwd.js";
 import { reinit } from "./commands/reinit.js";
+import { proxy } from "./commands/proxy.js";
+import { loadPsstConfig } from "./vault/psst-config.js";
 import { Vault } from "./vault/vault.js";
 
 const KNOWN_COMMANDS = new Set([
-  "init", "reinit", "passwd", "change-password",
+  "init", "reinit", "passwd", "change-password", "proxy",
   "set", "get", "list", "rm", "remove", "delete",
   "import", "export", "scan", "tag", "untag",
   "history", "rollback", "run",
@@ -91,10 +93,19 @@ GLOBAL FLAGS
   --json                        Output as JSON
   -q, --quiet                   Suppress output, use exit codes
 
+PROXY MODE
+  psst proxy enable --rest-url <url> [--api-key <key>]   Enable proxy (persists to ~/.psst/proxy.json)
+  psst proxy disable                                      Disable proxy, revert to local vaults
+  psst proxy status                                       Show current proxy config
+  psst list vaults                                        List vaults on server (when proxy enabled)
+  psst --vault prod set KEY                               Set secret in "prod" vault on server
+
 ENVIRONMENT VARIABLES
   PSST_GLOBAL                   Alternative to --global flag (set to "1" or "true")
   PSST_VAULT                    Alternative to --vault flag
   PSST_ENV                      Alias for PSST_VAULT (deprecated)
+  PSST_REST_URL                    Alternative to --rest-url flag
+  PSST_API_KEY                Alternative to --api-key flag
 
 EXAMPLES
   psst init                                               # Create local vault
@@ -142,6 +153,25 @@ async function main() {
     env = process.env.PSST_ENV;
   }
 
+  // Load persisted proxy config, then let CLI flags / env vars override
+  const savedProxy = loadPsstConfig().proxy;
+
+  let restUrl: string | undefined = savedProxy?.url;
+  const restUrlIndex = args.indexOf("--rest-url");
+  if (restUrlIndex !== -1 && args[restUrlIndex + 1] && !args[restUrlIndex + 1].startsWith("-")) {
+    restUrl = args[restUrlIndex + 1];
+  } else if (process.env.PSST_REST_URL) {
+    restUrl = process.env.PSST_REST_URL;
+  }
+
+  let apiKey: string | undefined = savedProxy?.apiKey;
+  const apiKeyIndex = args.indexOf("--api-key");
+  if (apiKeyIndex !== -1 && args[apiKeyIndex + 1] && !args[apiKeyIndex + 1].startsWith("-")) {
+    apiKey = args[apiKeyIndex + 1];
+  } else if (process.env.PSST_API_KEY) {
+    apiKey = process.env.PSST_API_KEY;
+  }
+
   // Parse --tag flags (can appear multiple times)
   const tags: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -156,6 +186,7 @@ async function main() {
     env,
     global,
     tags: tags.length > 0 ? tags : undefined,
+    restUrl: restUrl ? { url: restUrl, apiKey: apiKey } : undefined,
   };
 
   // Remove global flags from args for command processing
@@ -166,6 +197,8 @@ async function main() {
     if (i > 0 && (args[i - 1] === "--vault" || args[i - 1] === "--env")) return false;
     if (a === "--tag") return false;
     if (i > 0 && args[i - 1] === "--tag") return false;
+    if (a === "--api-key") return false;
+    if (i > 0 && args[i - 1] === "--api-key") return false;
     return true;
   });
 
@@ -244,6 +277,10 @@ async function main() {
 
   // Standard commands
   switch (command) {
+    case "proxy":
+      await proxy(cleanArgs.slice(1), options);
+      break;
+
     case "init":
       await init(cleanArgs.slice(1), options);
       break;

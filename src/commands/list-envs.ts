@@ -1,8 +1,42 @@
 import chalk from "chalk";
 import type { OutputOptions } from "../utils/output.js";
 import { Vault } from "../vault/vault.js";
+import { RestApiBackend } from "../vault/restapi-backend.js";
 
 export async function listEnvs(options: OutputOptions = {}): Promise<void> {
+  if (options.restUrl) {
+    const backend = new RestApiBackend({ url: options.restUrl.url, apiKey: options.restUrl.apiKey });
+    const vaults = await backend.listVaults();
+
+    if (options.json) {
+      console.log(JSON.stringify({ success: true, vaults }));
+      return;
+    }
+
+    if (options.quiet) {
+      for (const v of vaults) console.log(v.name);
+      return;
+    }
+
+    if (vaults.length === 0) {
+      console.log();
+      console.log(chalk.dim("No vaults found on proxy server."));
+      console.log();
+      console.log("Create one with", chalk.cyan("psst --proxy <url> init --vault <name>"));
+      console.log();
+      return;
+    }
+
+    console.log();
+    console.log(chalk.bold("Proxy Vaults"));
+    console.log();
+    for (const v of vaults) {
+      console.log(chalk.green("●"), v.name);
+    }
+    console.log();
+    return;
+  }
+
   const globalEnvs = Vault.listEnvironments(true);
   const localEnvs = Vault.listEnvironments(false);
 
@@ -25,7 +59,6 @@ export async function listEnvs(options: OutputOptions = {}): Promise<void> {
     return;
   }
 
-  // Human output
   if (globalEnvs.length === 0 && localEnvs.length === 0) {
     console.log();
     console.log(chalk.dim("No environments found."));

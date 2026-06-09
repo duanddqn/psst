@@ -6,6 +6,11 @@ import { Vault } from "../vault/vault.js";
 export async function getUnlockedVault(
   options: OutputOptions = {},
 ): Promise<Vault> {
+  if (options.restUrl) {
+    const vault = options.env ?? "default";
+    return Vault.openProxy(options.restUrl!.url, options.restUrl.apiKey, vault);
+  }
+
   const vaultPath = Vault.findVaultPath({
     global: options.global,
     env: options.env,

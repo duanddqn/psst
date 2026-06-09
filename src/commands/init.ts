@@ -7,7 +7,8 @@ import chalk from "chalk";
 import { errorMessage } from "../utils/errors.js";
 import { EXIT_ERROR, EXIT_USER_ERROR } from "../utils/exit-codes.js";
 import type { OutputOptions } from "../utils/output.js";
-import type { AwsBackendConfig, BackendType, KeyBackendType } from "../vault/config.js";
+import type { AwsBackendConfig, BackendType, KeyBackendType, RestApiBackendConfig } from "../vault/config.js";
+import { RestApiBackend } from "../vault/restapi-backend.js";
 import { readKeystorePassword } from "../utils/input.js";
 import { getPsstPassword, hashPassword, saveCredentials } from "../vault/credentials.js";
 import { Vault } from "../vault/vault.js";
@@ -194,6 +195,18 @@ export async function init(
   args: string[],
   options: OutputOptions = {},
 ): Promise<void> {
+  if (options.restUrl) {
+    const vault = options.env ?? "default";
+    const backend = new RestApiBackend({ url: options.restUrl.url, apiKey: options.restUrl.apiKey });
+    await backend.createVault(vault);
+    if (options.json) {
+      console.log(JSON.stringify({ success: true, vault, proxy: options.restUrl.url }));
+    } else if (!options.quiet) {
+      console.log(chalk.green("✓"), `Vault "${vault}" created on proxy (${options.restUrl.url})`);
+    }
+    return;
+  }
+
   // Handle deprecated --local flag
   const hasLocalFlag = args.includes("--local") || args.includes("-l");
   if (hasLocalFlag && !options.quiet && !options.json) {

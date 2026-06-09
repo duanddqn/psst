@@ -276,6 +276,15 @@ export class Vault {
     return null;
   }
 
+  static openProxy(url: string, apiKey: string | undefined, vault: string): Vault {
+    const fakeVaultPath = "";
+    const v = Object.create(Vault.prototype) as Vault;
+    (v as unknown as { vaultPath: string }).vaultPath = fakeVaultPath;
+    (v as unknown as { sqlite: null }).sqlite = null;
+    (v as unknown as { backend: VaultBackend }).backend = new RestApiBackend({ url, apiKey, vault });
+    return v;
+  }
+
   static getVaultPath(global: boolean = false, env?: string): string {
     const basePath = global
       ? join(homedir(), VAULT_DIR_NAME)

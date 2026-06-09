@@ -1,11 +1,17 @@
 import chalk from "chalk";
 
+export interface ProxyConfig {
+  url: string;
+  apiKey?: string;
+}
+
 export interface OutputOptions {
   json?: boolean;
   quiet?: boolean;
   env?: string;
   global?: boolean;
   tags?: string[];
+  restUrl?: ProxyConfig;
 }
 
 // Success indicators
