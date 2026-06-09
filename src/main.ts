@@ -10,11 +10,22 @@ import { init } from "./commands/init.js";
 import { list } from "./commands/list.js";
 import { listEnvs } from "./commands/list-envs.js";
 import { rm } from "./commands/rm.js";
+
 import { rollback } from "./commands/rollback.js";
 import { run } from "./commands/run.js";
 import { scan } from "./commands/scan.js";
 import { set } from "./commands/set.js";
 import { tag, untag } from "./commands/tag.js";
+import { passwd } from "./commands/passwd.js";
+import { reinit } from "./commands/reinit.js";
+import { Vault } from "./vault/vault.js";
+
+const KNOWN_COMMANDS = new Set([
+  "init", "reinit", "passwd", "change-password",
+  "set", "get", "list", "rm", "remove", "delete",
+  "import", "export", "scan", "tag", "untag",
+  "history", "rollback", "run",
+]);
 
 const HELP = `
 psst - AI-native secrets manager
@@ -25,6 +36,11 @@ VAULT MANAGEMENT
   psst init --env <name>                     Create vault for specific environment
   psst init --backend aws                    Create vault backed by AWS Secrets Manager
   psst init --backend aws --aws-region us-east-1 --aws-prefix psst/
+  psst init --key-backend sqlite             Use password-protected sqlite keystore (no OS keychain)
+  psst reinit                                Drop and re-initialize a vault (secrets lost)
+  psst rm vault <env>                        Delete a local vault env
+  psst rm vault @<env>                       Delete a global vault env
+  psst passwd                                Change sqlite keystore password
   psst list envs                             List available environments
 
 SECRET MANAGEMENT
@@ -34,7 +50,8 @@ SECRET MANAGEMENT
   psst get <NAME>               Get secret value (human debugging)
   psst list                     List secret names
   psst list --tag <t>           List secrets with tag (repeatable)
-  psst rm <NAME>                Remove secret
+  psst rm item <NAME>           Remove secret
+  psst rm <NAME>                Remove secret (shorthand)
   psst tag <NAME> <t1> [t2...]  Add tags to secret
   psst untag <NAME> <t1>...     Remove tags from secret
   psst history <NAME>           Show version history for secret
@@ -60,6 +77,10 @@ SECRET SCANNING
 
 OPTIONS
   --no-mask                       Disable output masking (for debugging)
+
+ENV SHORTHAND
+  psst @<env> <cmd>             Use global env  (e.g. psst @anyplan list)
+  psst <env> <cmd>              Use local env, falls back to global if no local match
 
 GLOBAL FLAGS
   -g, --global                  Use global vault (~/.psst/) instead of local
@@ -141,6 +162,35 @@ async function main() {
     return true;
   });
 
+  // Env shorthand: `psst @anyplan <cmd>` (global) or `psst anyplan <cmd>` (local, or global if no local match)
+  if (cleanArgs.length > 0 && !env) {
+    const first = cleanArgs[0];
+    if (first.startsWith("@")) {
+      options.global = true;
+      options.env = first.slice(1);
+      cleanArgs.shift();
+    } else if (!first.startsWith("-") && !KNOWN_COMMANDS.has(first)) {
+      // Resolve scope: local first, then global (unless --global already set)
+      const localMatch = Vault.findVaultPath({ global: false, env: first });
+      const globalMatch = Vault.findVaultPath({ global: true, env: first });
+      if (options.global && globalMatch) {
+        options.env = first;
+        cleanArgs.shift();
+      } else if (localMatch) {
+        options.env = first;
+        cleanArgs.shift();
+      } else if (globalMatch) {
+        options.global = true;
+        options.env = first;
+        cleanArgs.shift();
+      }
+    }
+  }
+
+  // Sync local vars so commands that pass env/global directly stay consistent
+  const resolvedEnv = options.env;
+  const resolvedGlobal = options.global;
+
   if (
     cleanArgs.length === 0 ||
     cleanArgs[0] === "--help" ||
@@ -178,8 +228,8 @@ async function main() {
 
     await exec(secretNames, cmdArgs, {
       noMask,
-      env,
-      global,
+      env: resolvedEnv,
+      global: resolvedGlobal,
       tags: options.tags,
     });
     return;
@@ -189,6 +239,15 @@ async function main() {
   switch (command) {
     case "init":
       await init(cleanArgs.slice(1), options);
+      break;
+
+    case "reinit":
+      await reinit(cleanArgs.slice(1), options);
+      break;
+
+    case "passwd":
+    case "change-password":
+      await passwd(options);
       break;
 
     case "set": {
@@ -239,18 +298,7 @@ async function main() {
     case "rm":
     case "remove":
     case "delete":
-      if (!cleanArgs[1]) {
-        if (json) {
-          console.log(
-            JSON.stringify({ success: false, error: "missing_name" }),
-          );
-        } else if (!quiet) {
-          console.error("Error: Secret name required");
-          console.error("Usage: psst rm <NAME>");
-        }
-        process.exit(1);
-      }
-      await rm(cleanArgs[1], options);
+      await rm(cleanArgs.slice(1), options);
       break;
 
     case "import": {
@@ -356,8 +404,8 @@ async function main() {
 
       await run(runCmdArgs, {
         noMask: runNoMask,
-        env,
-        global,
+        env: resolvedEnv,
+        global: resolvedGlobal,
         tags: options.tags,
       });
       break;

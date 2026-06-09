@@ -70,7 +70,8 @@ export async function importSecrets(
   let imported = 0;
   let skipped = 0;
 
-  for (const [name, value] of entries) {
+  for (const [rawName, value] of entries) {
+    const name = rawName.toUpperCase();
     if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
       skipped++;
       continue;

@@ -7,13 +7,48 @@ import chalk from "chalk";
 import { errorMessage } from "../utils/errors.js";
 import { EXIT_ERROR, EXIT_USER_ERROR } from "../utils/exit-codes.js";
 import type { OutputOptions } from "../utils/output.js";
-import type { AwsBackendConfig, BackendType } from "../vault/config.js";
+import type { AwsBackendConfig, BackendType, KeyBackendType } from "../vault/config.js";
+import { readKeystorePassword } from "../utils/input.js";
+import { getPsstPassword, hashPassword, saveCredentials } from "../vault/credentials.js";
 import { Vault } from "../vault/vault.js";
 
 const AWS_PKGS = [
   "@aws-sdk/client-secrets-manager",
   "@aws-sdk/credential-providers",
 ] as const;
+
+const KNOWN_INIT_FLAGS = new Set([
+  "--local", "-l",
+  "--global", "-g",
+  "--backend",
+  "--key-backend",
+  "--aws-region",
+  "--aws-prefix",
+  "--aws-profile",
+  "--env",
+  "--json",
+  "--quiet", "-q",
+]);
+
+/** Reject unrecognized flags and --flag=value syntax (silently dropped otherwise). */
+function validateInitArgs(args: string[]): void {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith("-")) continue;
+
+    // Reject --flag=value syntax
+    const eqIdx = arg.indexOf("=");
+    if (eqIdx !== -1) {
+      const flag = arg.slice(0, eqIdx);
+      const value = arg.slice(eqIdx + 1);
+      throw new Error(`Invalid syntax "${arg}". Use a space: ${flag} ${value}`);
+    }
+
+    if (!KNOWN_INIT_FLAGS.has(arg)) {
+      throw new Error(`Unknown flag "${arg}"`);
+    }
+  }
+}
 
 /**
  * Parse `--backend <name>` from the CLI args. Accepts "sqlite" (default)
@@ -29,6 +64,17 @@ function parseBackendFlag(args: string[]): BackendType | undefined {
   }
   if (value === "sqlite" || value === "aws") return value;
   throw new Error(`Unknown --backend "${value}". Supported: sqlite, aws.`);
+}
+
+function parseKeyBackendFlag(args: string[]): KeyBackendType | undefined {
+  const idx = args.indexOf("--key-backend");
+  if (idx === -1) return undefined;
+  const value = args[idx + 1];
+  if (!value || value.startsWith("-")) {
+    throw new Error("--key-backend requires a value (keychain or sqlite)");
+  }
+  if (value === "keychain" || value === "sqlite") return value;
+  throw new Error(`Unknown --key-backend "${value}". Supported: keychain, sqlite.`);
 }
 
 function parseStringFlag(args: string[], flag: string): string | undefined {
@@ -169,8 +215,11 @@ export async function init(
   // Backend selection — default sqlite, opt into aws with --backend aws.
   // parseBackendFlag throws on an unknown value; surface that cleanly.
   let backend: BackendType;
+  let keyBackend: KeyBackendType | undefined;
   try {
+    validateInitArgs(args);
     backend = parseBackendFlag(args) ?? "sqlite";
+    keyBackend = parseKeyBackendFlag(args);
   } catch (err) {
     const msg = errorMessage(err);
     if (options.json) {
@@ -235,8 +284,34 @@ export async function init(
     process.exit(EXIT_USER_ERROR);
   }
 
+  let keystorePassword: string | undefined;
+  if (keyBackend === "sqlite") {
+    const existing = getPsstPassword();
+    if (existing) {
+      keystorePassword = existing;
+      if (!options.quiet && !options.json) {
+        console.log(chalk.dim("  Using existing password from ~/.psst/credentials"));
+      }
+    } else {
+      const pw1 = await readKeystorePassword("Vault password: ");
+      if (!pw1) {
+        console.error(chalk.red("✗"), "A password is required for --key-backend sqlite.");
+        process.exit(EXIT_USER_ERROR);
+      }
+      const pw2 = await readKeystorePassword("Confirm password: ");
+      if (pw1 !== pw2) {
+        console.error(chalk.red("✗"), "Passwords do not match.");
+        process.exit(EXIT_USER_ERROR);
+      }
+      keystorePassword = hashPassword(pw1);
+      saveCredentials({ PSST_PASSWORD: keystorePassword });
+    }
+  }
+
   const result = await Vault.initializeVault(vaultPath, {
     backend,
+    keyBackend,
+    keystorePassword,
     aws: awsConfig,
   });
 
@@ -256,9 +331,10 @@ export async function init(
     }
 
     if (!options.quiet) {
+      const keyBackendLabel = keyBackend === "sqlite" ? ", key: sqlite" : "";
       console.log(
         chalk.green("\u2713"),
-        `${scope.charAt(0).toUpperCase() + scope.slice(1)} vault created for "${env}" (backend: ${backend})`,
+        `${scope.charAt(0).toUpperCase() + scope.slice(1)} vault created for "${env}" (backend: ${backend}${keyBackendLabel})`,
       );
       console.log(chalk.dim(`  ${vaultPath}`));
 

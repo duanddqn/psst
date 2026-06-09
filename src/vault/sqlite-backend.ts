@@ -22,6 +22,14 @@ import {
   isKeychainAvailable,
   storeKey,
 } from "./keychain.js";
+import type { KeyBackendType } from "./config.js";
+import {
+  getKeyFromSqlite,
+  isKeystorePresent,
+  storeKeyInSqlite,
+} from "./sqlite-keystore.js";
+import { readKeystorePassword } from "../utils/input.js";
+import { getPsstPassword } from "./credentials.js";
 
 const DB_NAME = "vault.db";
 const HISTORY_KEEP = 10;
@@ -29,6 +37,10 @@ const HISTORY_KEEP = 10;
 export interface SqliteBackendOptions {
   /** Encryption key (base64 or password string). Skips keychain/env var lookup. */
   key?: string;
+  /** Where to store/retrieve the vault encryption key. Default: "keychain". */
+  keyBackend?: KeyBackendType;
+  /** Vault directory path — required when keyBackend is "sqlite". */
+  vaultPath?: string;
 }
 
 export class SqliteBackend implements VaultBackend {
@@ -36,10 +48,14 @@ export class SqliteBackend implements VaultBackend {
 
   private db: SqliteDatabase;
   private key: Buffer | null = null;
+  private keyBackend: KeyBackendType;
+  private vaultPath: string;
 
   constructor(vaultPath: string, options?: SqliteBackendOptions) {
     const dbPath = join(vaultPath, DB_NAME);
     this.db = openDatabase(dbPath);
+    this.vaultPath = vaultPath;
+    this.keyBackend = options?.keyBackend ?? "keychain";
     this.initSchema();
 
     if (options?.key) {
@@ -86,7 +102,7 @@ export class SqliteBackend implements VaultBackend {
   }
 
   /**
-   * Unlock via keychain or PSST_PASSWORD fallback.
+   * Unlock via keychain, sqlite keystore, or PSST_PASSWORD fallback.
    * No-op if a key was provided via constructor options.
    */
   async unlock(): Promise<boolean> {
@@ -103,6 +119,28 @@ export class SqliteBackend implements VaultBackend {
     if (password) {
       this.key = keyToBuffer(password);
       return true;
+    }
+
+    if (this.keyBackend === "sqlite") {
+      const keystorePassword =
+        getPsstPassword() ?? (await readKeystorePassword("Vault password: "));
+      if (debug) {
+        process.stderr.write(
+          `[psst debug] unlock: sqlite keystore password=${keystorePassword ? "set" : "unset"}\n`,
+        );
+      }
+      if (!keystorePassword) return false;
+      const result = await getKeyFromSqlite(this.vaultPath, keystorePassword);
+      if (debug) {
+        process.stderr.write(
+          `[psst debug] unlock: sqlite keystore success=${result.success} error=${result.error ?? "none"}\n`,
+        );
+      }
+      if (result.success && result.key) {
+        this.key = keyToBuffer(result.key);
+        return true;
+      }
+      return false;
     }
 
     const keychainResult = await getKey();
@@ -378,7 +416,11 @@ export class SqliteBackend implements VaultBackend {
  */
 export async function initializeSqliteVault(
   vaultPath: string,
-  options?: { skipKeychain?: boolean },
+  options?: {
+    skipKeychain?: boolean;
+    keyBackend?: KeyBackendType;
+    keystorePassword?: string;
+  },
 ): Promise<{ success: boolean; error?: string }> {
   if (options?.skipKeychain) {
     const backend = new SqliteBackend(vaultPath);
@@ -386,6 +428,28 @@ export async function initializeSqliteVault(
     return { success: true };
   }
 
+  if (options?.keyBackend === "sqlite") {
+    const password = options.keystorePassword;
+    if (!password) {
+      return {
+        success: false,
+        error: "A password is required for the sqlite key backend.",
+      };
+    }
+    const key = generateKey();
+    const storeResult = await storeKeyInSqlite(vaultPath, key, password);
+    if (!storeResult.success) {
+      return { success: false, error: storeResult.error };
+    }
+    const backend = new SqliteBackend(vaultPath, {
+      keyBackend: "sqlite",
+      vaultPath,
+    });
+    backend.close();
+    return { success: true };
+  }
+
+  // Default: OS keychain
   const hasKeychain = await isKeychainAvailable();
 
   if (!hasKeychain && !process.env.PSST_PASSWORD) {
