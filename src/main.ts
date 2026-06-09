@@ -33,15 +33,16 @@ psst - AI-native secrets manager
 VAULT MANAGEMENT
   psst init                                  Create local vault (.psst/)
   psst init --global                         Create global vault (~/.psst/)
-  psst init --env <name>                     Create vault for specific environment
+  psst init --vault <name>                   Create vault with given name
   psst init --backend aws                    Create vault backed by AWS Secrets Manager
   psst init --backend aws --aws-region us-east-1 --aws-prefix psst/
+  psst init --backend restapi --rest-url http://localhost:5000 [--rest-api-key <key>]
   psst init --key-backend sqlite             Use password-protected sqlite keystore (no OS keychain)
   psst reinit                                Drop and re-initialize a vault (secrets lost)
-  psst rm vault <env>                        Delete a local vault env
-  psst rm vault @<env>                       Delete a global vault env
+  psst rm vault <name>                       Delete a local vault
+  psst rm vault @<name>                      Delete a global vault
   psst passwd                                Change sqlite keystore password
-  psst list envs                             List available environments
+  psst list vaults                           List available vaults
 
 SECRET MANAGEMENT
   psst set <NAME> [VALUE]       Set secret (prompt if no value)
@@ -78,20 +79,22 @@ SECRET SCANNING
 OPTIONS
   --no-mask                       Disable output masking (for debugging)
 
-ENV SHORTHAND
-  psst @<env> <cmd>             Use global env  (e.g. psst @anyplan list)
-  psst <env> <cmd>              Use local env, falls back to global if no local match
+VAULT SHORTHAND
+  psst @<name> <cmd>            Use global vault  (e.g. psst @anyplan list)
+  psst <name> <cmd>             Use local vault, falls back to global if no local match
 
 GLOBAL FLAGS
   -g, --global                  Use global vault (~/.psst/) instead of local
-  --env <name>                  Use specific environment (default: "default")
+  --vault <name>                Use specific vault (default: "default")
+  --env <name>                  Alias for --vault (deprecated)
   --tag <name>                  Filter by tag (repeatable for multiple tags)
   --json                        Output as JSON
   -q, --quiet                   Suppress output, use exit codes
 
 ENVIRONMENT VARIABLES
   PSST_GLOBAL                   Alternative to --global flag (set to "1" or "true")
-  PSST_ENV                      Alternative to --env flag
+  PSST_VAULT                    Alternative to --vault flag
+  PSST_ENV                      Alias for PSST_VAULT (deprecated)
 
 EXAMPLES
   psst init                                               # Create local vault
@@ -103,7 +106,7 @@ EXAMPLES
   psst run ./deploy.sh                                    # All secrets injected
   psst --tag aws run ./deploy.sh                          # Only aws-tagged secrets
   psst STRIPE_KEY -- curl -H "Authorization: $STRIPE_KEY" https://api.stripe.com
-  psst --env prod run ./deploy.sh                         # Use prod environment
+  psst --vault prod run ./deploy.sh                       # Use prod vault
   psst --global list                                      # List from global vault
 `;
 
@@ -122,15 +125,19 @@ async function main() {
       process.env.PSST_GLOBAL.toLowerCase() === "true";
   }
 
-  // Parse --env flag or fallback to PSST_ENV
+  // Parse --vault (preferred) or --env (legacy alias) flag, fallback to PSST_VAULT / PSST_ENV
   let env: string | undefined;
+  const vaultIndex = args.indexOf("--vault");
   const envIndex = args.indexOf("--env");
+  const resolvedIndex = vaultIndex !== -1 ? vaultIndex : envIndex;
   if (
-    envIndex !== -1 &&
-    args[envIndex + 1] &&
-    !args[envIndex + 1].startsWith("-")
+    resolvedIndex !== -1 &&
+    args[resolvedIndex + 1] &&
+    !args[resolvedIndex + 1].startsWith("-")
   ) {
-    env = args[envIndex + 1];
+    env = args[resolvedIndex + 1];
+  } else if (process.env.PSST_VAULT) {
+    env = process.env.PSST_VAULT;
   } else if (process.env.PSST_ENV) {
     env = process.env.PSST_ENV;
   }
@@ -155,8 +162,8 @@ async function main() {
   const cleanArgs = args.filter((a, i) => {
     if (a === "--json" || a === "--quiet" || a === "-q") return false;
     if (a === "--global" || a === "-g") return false;
-    if (a === "--env") return false;
-    if (i > 0 && args[i - 1] === "--env") return false;
+    if (a === "--vault" || a === "--env") return false;
+    if (i > 0 && (args[i - 1] === "--vault" || args[i - 1] === "--env")) return false;
     if (a === "--tag") return false;
     if (i > 0 && args[i - 1] === "--tag") return false;
     return true;
@@ -288,7 +295,7 @@ async function main() {
       break;
 
     case "list":
-      if (cleanArgs[1] === "envs") {
+      if (cleanArgs[1] === "vaults" || cleanArgs[1] === "envs") {
         await listEnvs(options);
       } else {
         await list(options);
