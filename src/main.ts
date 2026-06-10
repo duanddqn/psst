@@ -331,13 +331,21 @@ async function main() {
       await get(cleanArgs[1], options);
       break;
 
-    case "list":
+    case "list": {
       if (cleanArgs[1] === "vaults" || cleanArgs[1] === "envs") {
         await listEnvs(options);
       } else {
+        // psst list <vault>
+        const listVault = cleanArgs[1] && !cleanArgs[1].startsWith("-") ? cleanArgs[1] : undefined;
+        if (listVault && !options.env) {
+          const globalMatch = Vault.findVaultPath({ global: true, env: listVault });
+          options.env = listVault;
+          if (globalMatch) options.global = true;
+        }
         await list(options);
       }
       break;
+    }
 
     case "rm":
     case "remove":
@@ -352,11 +360,21 @@ async function main() {
       const pattern =
         patternIndex !== -1 ? cleanArgs[patternIndex + 1] : undefined;
 
-      const fileArgs = cleanArgs
-        .slice(1)
-        .filter((a) => !a.startsWith("--") && a !== pattern);
+      let importArgs = cleanArgs.slice(1).filter((a) => !a.startsWith("--") && a !== pattern);
 
-      await importSecrets(fileArgs, {
+      // psst import <vault> <file> — first bare arg is vault if it matches a known vault
+      if (importArgs.length > 0 && !options.env) {
+        const maybeVault = importArgs[0];
+        const localMatch = Vault.findVaultPath({ global: false, env: maybeVault });
+        const globalMatch = Vault.findVaultPath({ global: true, env: maybeVault });
+        if (localMatch || globalMatch) {
+          options.env = maybeVault;
+          if (globalMatch && !localMatch) options.global = true;
+          importArgs = importArgs.slice(1);
+        }
+      }
+
+      await importSecrets(importArgs, {
         ...options,
         stdin: fromStdin,
         fromEnv,
