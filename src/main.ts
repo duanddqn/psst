@@ -61,11 +61,14 @@ SECRET MANAGEMENT
   psst rollback <NAME> --to N   Restore secret to version N
 
 IMPORT/EXPORT
-  psst import <file>            Import secrets from .env file
-  psst import --stdin           Import secrets from stdin
-  psst import --from-env        Import from environment variables
-  psst export                   Export secrets to stdout (.env format)
-  psst export --env-file <f>    Export secrets to file
+  psst import <file>                    Import secrets from .env file
+  psst import <vault> <file>            Import into specific vault
+  psst import --stdin                   Import secrets from stdin
+  psst import --from-env                Import from environment variables
+  psst export                           Export secrets to stdout (.env format)
+  psst export <vault>                   Export specific vault to stdout
+  psst export --env-file <f>            Export secrets to file
+  psst export <vault> --env-file <f>    Export specific vault to file
 
 AGENT EXECUTION
   psst run <command>              Run command with ALL secrets injected
@@ -82,8 +85,11 @@ OPTIONS
   --no-mask                       Disable output masking (for debugging)
 
 VAULT SHORTHAND
-  psst @<name> <cmd>            Use global vault  (e.g. psst @anyplan list)
-  psst <name> <cmd>             Use local vault, falls back to global if no local match
+  psst <vault> <cmd>            Use vault by name, falls back to global if no local match
+  psst @<vault> <cmd>           Force global vault  (e.g. psst @anyplan list)
+  psst list <vault>             List secrets in vault
+  psst export <vault>           Export vault to stdout
+  psst import <vault> <file>    Import into vault
 
 GLOBAL FLAGS
   -g, --global                  Use global vault (~/.psst/) instead of local
