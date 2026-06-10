@@ -33,6 +33,9 @@ function normalizeValue(v: string): string {
   if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
     return JSON.stringify(parseArrayLiteral(trimmed.slice(1, -1)));
   }
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try { return JSON.stringify(JSON.parse(trimmed)); } catch { /* fall through */ }
+  }
   return v;
 }
 
