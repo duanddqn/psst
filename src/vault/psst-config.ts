@@ -8,6 +8,7 @@ const PSST_CONFIG_PATH = join(PSST_DIR, "psst.json");
 export interface ProxySettings {
   url: string;
   apiKey?: string;
+  enabled?: boolean;
 }
 
 export interface PsstConfig {

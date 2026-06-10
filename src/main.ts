@@ -156,7 +156,7 @@ async function main() {
   // Load persisted proxy config, then let CLI flags / env vars override
   const savedProxy = loadPsstConfig().proxy;
 
-  let restUrl: string | undefined = savedProxy?.url;
+  let restUrl: string | undefined = (savedProxy?.enabled !== false) ? savedProxy?.url : undefined;
   const restUrlIndex = args.indexOf("--rest-url");
   if (restUrlIndex !== -1 && args[restUrlIndex + 1] && !args[restUrlIndex + 1].startsWith("-")) {
     restUrl = args[restUrlIndex + 1];

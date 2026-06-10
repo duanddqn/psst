@@ -30,7 +30,7 @@ export async function proxy(args: string[], options: OutputOptions = {}): Promis
       ? args[keyIndex + 1]
       : options.restUrl?.apiKey;
 
-    updatePsstConfig({ proxy: { url, ...(apiKey ? { apiKey } : {}) } });
+    updatePsstConfig({ proxy: { url, ...(apiKey ? { apiKey } : {}), enabled: true } });
 
     if (options.json) {
       console.log(JSON.stringify({ success: true, url, hasApiKey: !!apiKey }));
@@ -43,7 +43,8 @@ export async function proxy(args: string[], options: OutputOptions = {}): Promis
   }
 
   if (sub === "disable") {
-    updatePsstConfig({ proxy: undefined });
+    const current = loadPsstConfig().proxy;
+    updatePsstConfig({ proxy: current ? { ...current, enabled: false } : undefined });
     if (options.json) {
       console.log(JSON.stringify({ success: true }));
     } else if (!options.quiet) {
@@ -58,11 +59,14 @@ export async function proxy(args: string[], options: OutputOptions = {}): Promis
       console.log(JSON.stringify({ enabled: !!config.proxy, ...config }));
       return;
     }
-    if (config.proxy) {
-      console.log(chalk.green("●"), `Proxy enabled → ${config.proxy.url}`);
+    if (config.proxy?.url) {
+      const on = config.proxy.enabled !== false;
+      const dot = on ? chalk.green("●") : chalk.dim("●");
+      const state = on ? "enabled" : "disabled";
+      console.log(dot, `Proxy ${state} → ${config.proxy.url}`);
       console.log(chalk.dim(`  API key: ${config.proxy.apiKey ? "set" : "not set"}`));
     } else {
-      console.log(chalk.dim("●"), "Proxy disabled (using local vaults)");
+      console.log(chalk.dim("●"), "No proxy configured");
     }
     return;
   }
