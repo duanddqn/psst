@@ -14,8 +14,9 @@ export async function proxy(args: string[], options: OutputOptions = {}): Promis
 
   if (sub === "enable") {
     const urlIndex = args.indexOf("--rest-url");
-    const url = urlIndex !== -1 ? args[urlIndex + 1] : undefined;
-    if (!url || url.startsWith("-")) {
+    const urlArg = urlIndex !== -1 ? args[urlIndex + 1] : undefined;
+    const url = (urlArg && !urlArg.startsWith("-")) ? urlArg : loadPsstConfig().proxy?.url;
+    if (!url) {
       console.error(chalk.red("✗"), "--rest-url is required");
       console.error(chalk.dim("  Usage: psst proxy enable --rest-url <url> [--api-key <key>]"));
       process.exit(EXIT_USER_ERROR);
