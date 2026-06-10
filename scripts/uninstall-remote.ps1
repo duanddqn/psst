@@ -6,7 +6,7 @@
 
 param(
     [Parameter(Mandatory)][string]$Vault,
-    [string]$InstallDir = "/usr/local/bin"
+    [string]$InstallDir = "~/.local/bin"
 )
 
 Write-Host "Removing psst from remote ($Vault)..." -ForegroundColor Cyan
@@ -18,7 +18,7 @@ ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 ssh.connect(os.environ['SSH_IP'], username=os.environ['SSH_USER'], password=os.environ['SSH_PASS'])
 
-_, out, err = ssh.exec_command('sudo rm -f $InstallDir/psst && echo removed')
+_, out, err = ssh.exec_command('rm -f $InstallDir/psst && echo removed')
 print(out.read().decode().strip())
 e = err.read().decode().strip()
 if e: print(e)

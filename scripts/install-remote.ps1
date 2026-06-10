@@ -11,7 +11,7 @@ param(
     [Parameter(Mandatory)][string]$Vault,
     [ValidateSet("arm64", "arm", "x64")]
     [string]$Arch = "arm64",
-    [string]$InstallDir = "/usr/local/bin"
+    [string]$InstallDir = "~/.local/bin"
 )
 
 $targets = @{
@@ -47,7 +47,7 @@ sftp.put(r'$($localBinary -replace '\\', '/')', '/tmp/psst')
 sftp.close()
 
 install_dir = '$InstallDir'
-_, out, err = ssh.exec_command(f'sudo mv /tmp/psst {install_dir}/psst && sudo chmod +x {install_dir}/psst && psst --version')
+_, out, err = ssh.exec_command(f'mkdir -p {install_dir} && mv /tmp/psst {install_dir}/psst && chmod +x {install_dir}/psst && {install_dir}/psst --version')
 print(out.read().decode().strip())
 e = err.read().decode().strip()
 if e: print(e)
