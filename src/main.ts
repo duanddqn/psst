@@ -203,8 +203,8 @@ async function main() {
     if (i > 0 && (args[i - 1] === "--vault" || args[i - 1] === "--env")) return false;
     if (a === "--tag") return false;
     if (i > 0 && args[i - 1] === "--tag") return false;
-    if (a === "--api-key") return false;
-    if (i > 0 && args[i - 1] === "--api-key") return false;
+    if (a === "--api-key" && !(args[0] === "proxy" && args[1] === "config")) return false;
+    if (i > 0 && args[i - 1] === "--api-key" && !(args[0] === "proxy" && args[1] === "config")) return false;
     return true;
   });
 
@@ -277,6 +277,7 @@ async function main() {
       env: resolvedEnv,
       global: resolvedGlobal,
       tags: options.tags,
+      restUrl: options.restUrl,
     });
     return;
   }
@@ -483,6 +484,7 @@ async function main() {
         env: resolvedEnv,
         global: resolvedGlobal,
         tags: options.tags,
+        restUrl: options.restUrl,
       });
       break;
     }

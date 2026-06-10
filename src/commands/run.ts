@@ -6,6 +6,7 @@ import {
   EXIT_USER_ERROR,
 } from "../utils/exit-codes.js";
 import { Vault } from "../vault/vault.js";
+import { RestApiBackend } from "../vault/restapi-backend.js";
 import { expandEnvVars, maskSecrets } from "./exec.js";
 
 interface RunOptions {
@@ -13,6 +14,7 @@ interface RunOptions {
   env?: string;
   global?: boolean;
   tags?: string[];
+  restUrl?: { url: string; apiKey?: string };
 }
 
 /**
@@ -22,44 +24,54 @@ export async function run(
   cmdArgs: string[],
   options: RunOptions = {},
 ): Promise<void> {
-  const vaultPath = Vault.findVaultPath({
-    global: options.global,
-    env: options.env,
-  });
-
-  if (!vaultPath) {
-    const scope = options.global ? "global" : "local";
-    const envMsg = options.env ? ` for environment "${options.env}"` : "";
-    console.error(chalk.red("✗"), `No ${scope} vault found${envMsg}`);
-    const globalFlag = options.global ? " --global" : "";
-    const envFlag = options.env ? ` --env ${options.env}` : "";
-    console.log(chalk.dim(`  Run: psst init${globalFlag}${envFlag}`));
-    process.exit(EXIT_NO_VAULT);
-  }
-
-  const vault = new Vault(vaultPath);
-  const success = await vault.unlock();
-
-  if (!success) {
-    console.error(chalk.red("✗"), "Failed to unlock vault");
-    console.log(
-      chalk.dim("  Ensure keychain is available or set PSST_PASSWORD"),
-    );
-    process.exit(EXIT_AUTH_FAILED);
-  }
-
-  // Get secrets (optionally filtered by tags)
-  const secretMetas = await vault.listSecrets(options.tags);
   const secrets = new Map<string, string>();
 
-  for (const meta of secretMetas) {
-    const value = await vault.getSecret(meta.name);
-    if (value !== null) {
-      secrets.set(meta.name, value);
+  if (options.restUrl) {
+    const backend = new RestApiBackend({
+      url: options.restUrl.url,
+      apiKey: options.restUrl.apiKey,
+      vault: options.env,
+    });
+    const metas = await backend.listSecrets(options.tags);
+    for (const meta of metas) {
+      const value = await backend.getSecret(meta.name);
+      if (value !== null) secrets.set(meta.name, value);
     }
-  }
+  } else {
+    const vaultPath = Vault.findVaultPath({
+      global: options.global,
+      env: options.env,
+    });
 
-  vault.close();
+    if (!vaultPath) {
+      const scope = options.global ? "global" : "local";
+      const envMsg = options.env ? ` for environment "${options.env}"` : "";
+      console.error(chalk.red("✗"), `No ${scope} vault found${envMsg}`);
+      const globalFlag = options.global ? " --global" : "";
+      const envFlag = options.env ? ` --env ${options.env}` : "";
+      console.log(chalk.dim(`  Run: psst init${globalFlag}${envFlag}`));
+      process.exit(EXIT_NO_VAULT);
+    }
+
+    const vault = new Vault(vaultPath);
+    const success = await vault.unlock();
+
+    if (!success) {
+      console.error(chalk.red("✗"), "Failed to unlock vault");
+      console.log(
+        chalk.dim("  Ensure keychain is available or set PSST_PASSWORD"),
+      );
+      process.exit(EXIT_AUTH_FAILED);
+    }
+
+    const secretMetas = await vault.listSecrets(options.tags);
+    for (const meta of secretMetas) {
+      const value = await vault.getSecret(meta.name);
+      if (value !== null) secrets.set(meta.name, value);
+    }
+
+    vault.close();
+  }
 
   if (secrets.size === 0) {
     const tagMsg = options.tags?.length

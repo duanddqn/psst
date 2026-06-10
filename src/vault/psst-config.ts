@@ -30,5 +30,10 @@ export function savePsstConfig(config: PsstConfig): void {
 }
 
 export function updatePsstConfig(patch: Partial<PsstConfig>): void {
-  savePsstConfig({ ...loadPsstConfig(), ...patch });
+  const current = loadPsstConfig();
+  savePsstConfig({
+    ...current,
+    ...patch,
+    ...(patch.proxy ? { proxy: { ...current.proxy, ...patch.proxy } } : {}),
+  });
 }

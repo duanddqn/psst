@@ -13,31 +13,52 @@ export async function proxy(args: string[], options: OutputOptions = {}): Promis
   const sub = args[0];
 
   if (sub === "enable") {
+    const current = loadPsstConfig().proxy;
+    updatePsstConfig({ proxy: { url: current?.url ?? "", ...current, enabled: true } });
+    if (options.json) {
+      console.log(JSON.stringify({ success: true }));
+    } else if (!options.quiet) {
+      console.log(chalk.green("✓"), "Proxy enabled.");
+      if (!current?.url) {
+        console.log(chalk.yellow("⚠"), "No server URL configured.");
+        console.log(chalk.dim("  Run: psst proxy config --rest-url <url>"));
+      }
+      if (!current?.apiKey) {
+        console.log(chalk.dim("  No API key set. Run: psst proxy config --api-key <key>"));
+      }
+    }
+    return;
+  }
+
+  if (sub === "config") {
     const urlIndex = args.indexOf("--rest-url");
-    const urlArg = urlIndex !== -1 ? args[urlIndex + 1] : undefined;
-    const url = (urlArg && !urlArg.startsWith("-")) ? urlArg : loadPsstConfig().proxy?.url;
-    if (!url) {
-      console.error(chalk.red("✗"), "--rest-url is required");
-      console.error(chalk.dim("  Usage: psst proxy enable --rest-url <url> [--api-key <key>]"));
-      process.exit(EXIT_USER_ERROR);
-    }
-    try { new URL(url); } catch {
-      console.error(chalk.red("✗"), `Invalid URL: "${url}"`);
-      process.exit(EXIT_USER_ERROR);
-    }
+    const urlArg = (urlIndex !== -1 && args[urlIndex + 1] && !args[urlIndex + 1].startsWith("-"))
+      ? args[urlIndex + 1] : undefined;
     const keyIndex = args.indexOf("--api-key");
     const apiKey = (keyIndex !== -1 && args[keyIndex + 1] && !args[keyIndex + 1].startsWith("-"))
-      ? args[keyIndex + 1]
-      : options.restUrl?.apiKey;
+      ? args[keyIndex + 1] : undefined;
 
-    updatePsstConfig({ proxy: { url, ...(apiKey ? { apiKey } : {}), enabled: true } });
+    if (!urlArg && !apiKey) {
+      console.error(chalk.red("✗"), "Nothing to update.");
+      console.error(chalk.dim("  Usage: psst proxy config [--rest-url <url>] [--api-key <key>]"));
+      process.exit(EXIT_USER_ERROR);
+    }
+
+    if (urlArg) {
+      try { new URL(urlArg); } catch {
+        console.error(chalk.red("✗"), `Invalid URL: "${urlArg}"`);
+        process.exit(EXIT_USER_ERROR);
+      }
+    }
+
+    const current = loadPsstConfig().proxy;
+    updatePsstConfig({ proxy: { ...current, url: urlArg ?? current?.url ?? "", ...(apiKey ? { apiKey } : {}) } });
 
     if (options.json) {
-      console.log(JSON.stringify({ success: true, url, hasApiKey: !!apiKey }));
+      console.log(JSON.stringify({ success: true }));
     } else if (!options.quiet) {
-      console.log(chalk.green("✓"), `Proxy enabled → ${url}`);
-      console.log(chalk.dim("  All psst commands now route through the server."));
-      console.log(chalk.dim("  Run: psst proxy disable  to turn off."));
+      if (urlArg) console.log(chalk.green("✓"), `Server URL set → ${urlArg}`);
+      if (apiKey) console.log(chalk.green("✓"), "API key updated.");
     }
     return;
   }
@@ -72,6 +93,7 @@ export async function proxy(args: string[], options: OutputOptions = {}): Promis
   }
 
   console.error(chalk.red("✗"), `Unknown subcommand: ${sub}`);
-  console.error(chalk.dim("  Usage: psst proxy enable|disable|status"));
+  console.error(chalk.dim("  Usage: psst proxy enable|disable|config|status"));
+  console.error(chalk.dim("    psst proxy config --rest-url <url> --api-key <key>"));
   process.exit(EXIT_USER_ERROR);
 }

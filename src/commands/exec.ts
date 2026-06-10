@@ -6,6 +6,7 @@ import {
   EXIT_USER_ERROR,
 } from "../utils/exit-codes.js";
 import { Vault } from "../vault/vault.js";
+import { RestApiBackend } from "../vault/restapi-backend.js";
 
 /**
  * Expand $VAR and ${VAR} references in a string using the given env.
@@ -27,6 +28,7 @@ interface ExecOptions {
   env?: string;
   global?: boolean;
   tags?: string[];
+  restUrl?: { url: string; apiKey?: string };
 }
 
 export async function exec(
@@ -34,80 +36,97 @@ export async function exec(
   cmdArgs: string[],
   options: ExecOptions = {},
 ): Promise<void> {
-  const vaultPath = Vault.findVaultPath({
-    global: options.global,
-    env: options.env,
-  });
-
-  if (!vaultPath) {
-    const scope = options.global ? "global" : "local";
-    const envMsg = options.env ? ` for environment "${options.env}"` : "";
-    console.error(chalk.red("✗"), `No ${scope} vault found${envMsg}`);
-    const globalFlag = options.global ? " --global" : "";
-    const envFlag = options.env ? ` --env ${options.env}` : "";
-    console.log(chalk.dim(`  Run: psst init${globalFlag}${envFlag}`));
-    process.exit(EXIT_NO_VAULT);
-  }
-
-  const vault = new Vault(vaultPath);
-  const success = await vault.unlock();
-
-  if (!success) {
-    console.error(chalk.red("✗"), "Failed to unlock vault");
-    console.log(
-      chalk.dim("  Ensure keychain is available or set PSST_PASSWORD"),
-    );
-    process.exit(EXIT_AUTH_FAILED);
-  }
-
-  // Get secrets - either by name or by tag
   const secrets = new Map<string, string>();
 
-  if (options.tags?.length && secretNames.length === 0) {
-    // Tag-based selection: get all secrets with matching tags
-    const secretMetas = await vault.listSecrets(options.tags);
-    for (const meta of secretMetas) {
-      const value = await vault.getSecret(meta.name);
-      if (value !== null) {
-        secrets.set(meta.name, value);
-      }
-    }
-    vault.close();
+  if (options.restUrl) {
+    const backend = new RestApiBackend({
+      url: options.restUrl.url,
+      apiKey: options.restUrl.apiKey,
+      vault: options.env,
+    });
 
-    if (secrets.size === 0) {
-      console.error(
-        chalk.yellow("⚠"),
-        `No secrets with tags: ${options.tags.join(", ")}`,
-      );
-      console.log(chalk.dim("  Add tags with: psst tag <NAME> <tag>"));
+    if (secretNames.length > 0) {
+      const namedSecrets = await backend.getSecrets(secretNames);
+      const missing: string[] = [];
+      for (const name of secretNames) {
+        if (!namedSecrets.has(name)) {
+          if (process.env[name]) {
+            secrets.set(name, process.env[name]!);
+          } else {
+            missing.push(name);
+          }
+        } else {
+          secrets.set(name, namedSecrets.get(name)!);
+        }
+      }
+      if (missing.length > 0) {
+        console.error(chalk.red("✗"), `Missing secrets: ${chalk.bold(missing.join(", "))}`);
+        console.log(chalk.dim("  Add with: psst set <NAME>"));
+        process.exit(EXIT_USER_ERROR);
+      }
+    } else {
+      const metas = await backend.listSecrets(options.tags);
+      for (const meta of metas) {
+        const value = await backend.getSecret(meta.name);
+        if (value !== null) secrets.set(meta.name, value);
+      }
     }
   } else {
-    // Name-based selection
-    const namedSecrets = await vault.getSecrets(secretNames);
-    vault.close();
+    const vaultPath = Vault.findVaultPath({
+      global: options.global,
+      env: options.env,
+    });
 
-    // Check for missing secrets, fallback to env vars
-    const missing: string[] = [];
-    for (const name of secretNames) {
-      if (!namedSecrets.has(name)) {
-        // Fallback to environment variable
-        if (process.env[name]) {
-          secrets.set(name, process.env[name]!);
-        } else {
-          missing.push(name);
-        }
-      } else {
-        secrets.set(name, namedSecrets.get(name)!);
-      }
+    if (!vaultPath) {
+      const scope = options.global ? "global" : "local";
+      const envMsg = options.env ? ` for environment "${options.env}"` : "";
+      console.error(chalk.red("✗"), `No ${scope} vault found${envMsg}`);
+      const globalFlag = options.global ? " --global" : "";
+      const envFlag = options.env ? ` --env ${options.env}` : "";
+      console.log(chalk.dim(`  Run: psst init${globalFlag}${envFlag}`));
+      process.exit(EXIT_NO_VAULT);
     }
 
-    if (missing.length > 0) {
-      console.error(
-        chalk.red("✗"),
-        `Missing secrets: ${chalk.bold(missing.join(", "))}`,
-      );
-      console.log(chalk.dim("  Add with: psst set <NAME>"));
-      process.exit(EXIT_USER_ERROR);
+    const vault = new Vault(vaultPath);
+    const success = await vault.unlock();
+
+    if (!success) {
+      console.error(chalk.red("✗"), "Failed to unlock vault");
+      console.log(chalk.dim("  Ensure keychain is available or set PSST_PASSWORD"));
+      process.exit(EXIT_AUTH_FAILED);
+    }
+
+    if (options.tags?.length && secretNames.length === 0) {
+      const secretMetas = await vault.listSecrets(options.tags);
+      for (const meta of secretMetas) {
+        const value = await vault.getSecret(meta.name);
+        if (value !== null) secrets.set(meta.name, value);
+      }
+      vault.close();
+      if (secrets.size === 0) {
+        console.error(chalk.yellow("⚠"), `No secrets with tags: ${options.tags.join(", ")}`);
+        console.log(chalk.dim("  Add tags with: psst tag <NAME> <tag>"));
+      }
+    } else {
+      const namedSecrets = await vault.getSecrets(secretNames);
+      vault.close();
+      const missing: string[] = [];
+      for (const name of secretNames) {
+        if (!namedSecrets.has(name)) {
+          if (process.env[name]) {
+            secrets.set(name, process.env[name]!);
+          } else {
+            missing.push(name);
+          }
+        } else {
+          secrets.set(name, namedSecrets.get(name)!);
+        }
+      }
+      if (missing.length > 0) {
+        console.error(chalk.red("✗"), `Missing secrets: ${chalk.bold(missing.join(", "))}`);
+        console.log(chalk.dim("  Add with: psst set <NAME>"));
+        process.exit(EXIT_USER_ERROR);
+      }
     }
   }
 
