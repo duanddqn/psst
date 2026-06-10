@@ -370,6 +370,14 @@ async function main() {
       const envFile =
         envFileIndex !== -1 ? cleanArgs[envFileIndex + 1] : undefined;
 
+      // psst export <vault> [--env-file <f>]
+      const exportVault = cleanArgs[1] && !cleanArgs[1].startsWith("-") ? cleanArgs[1] : undefined;
+      if (exportVault && !options.env) {
+        const globalMatch = Vault.findVaultPath({ global: true, env: exportVault });
+        options.env = exportVault;
+        if (globalMatch) options.global = true;
+      }
+
       await exportSecrets({ ...options, envFile });
       break;
     }
