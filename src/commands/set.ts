@@ -13,6 +13,8 @@ export async function set(
   name: string,
   options: SetOptions = {},
 ): Promise<void> {
+  name = name.toUpperCase();
+
   // Validate secret name
   if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
     if (options.json) {
@@ -22,7 +24,7 @@ export async function set(
     } else if (!options.quiet) {
       console.error(chalk.red("✗"), "Invalid name format");
       console.log(
-        chalk.dim("  Must be uppercase with underscores (e.g., STRIPE_KEY)"),
+        chalk.dim("  Must be letters, digits and underscores (e.g., STRIPE_KEY)"),
       );
     }
     process.exit(EXIT_USER_ERROR);
