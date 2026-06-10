@@ -4,6 +4,38 @@ import { readSecretValue, readStdin } from "../utils/input.js";
 import type { OutputOptions } from "../utils/output.js";
 import { getUnlockedVault } from "./common.js";
 
+function parseArrayLiteral(inner: string): (string | number)[] {
+  const items: (string | number)[] = [];
+  let i = 0;
+  while (i < inner.length) {
+    if (inner[i] === " " || inner[i] === ",") { i++; continue; }
+    if (inner[i] === '"' || inner[i] === "'") {
+      const q = inner[i++];
+      let s = "";
+      while (i < inner.length && inner[i] !== q) {
+        if (inner[i] === "\\" && i + 1 < inner.length) { i++; }
+        s += inner[i++];
+      }
+      i++;
+      items.push(s);
+    } else {
+      let tok = "";
+      while (i < inner.length && inner[i] !== ",") tok += inner[i++];
+      tok = tok.trim();
+      if (tok !== "") items.push(/^-?\d+(\.\d+)?$/.test(tok) ? Number(tok) : tok);
+    }
+  }
+  return items;
+}
+
+function normalizeValue(v: string): string {
+  const trimmed = v.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    return JSON.stringify(parseArrayLiteral(trimmed.slice(1, -1)));
+  }
+  return v;
+}
+
 interface SetOptions extends OutputOptions {
   stdin?: boolean;
   value?: string;
@@ -51,6 +83,7 @@ export async function set(
     process.exit(EXIT_USER_ERROR);
   }
 
+  value = normalizeValue(value);
   const vault = await getUnlockedVault(options);
   await vault.setSecret(name, value, options.tags);
   vault.close();
