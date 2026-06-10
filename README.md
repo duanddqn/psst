@@ -52,28 +52,39 @@ The secret never touches the agent's context. It's injected into the subprocess 
 
 psst supports pluggable storage backends. Pick the one that fits your environment:
 
-| Backend  | Storage                    | Best for                               |
-|----------|----------------------------|----------------------------------------|
-| `sqlite` | Local encrypted SQLite DB  | Laptops, dev machines (default)        |
-| `aws`    | AWS Secrets Manager        | EC2 / headless / shared team secrets   |
+| Backend   | Storage                          | Best for                               |
+|-----------|----------------------------------|----------------------------------------|
+| `sqlite`  | Local encrypted SQLite DB        | Laptops, dev machines (default)        |
+| `aws`     | AWS Secrets Manager              | EC2 / headless / shared team secrets   |
+| `restapi` | Centralized psst-server (HTTP)   | Home labs, shared across machines      |
 
-### Default: SQLite (local, encrypted)
+### SQLite (local, encrypted)
 
-```bash
-psst init                    # creates .psst/ with SQLite + OS keychain key
+```
+psst init                              # OS keychain for key storage (default)
+psst init --key-backend sqlite         # Password-protected key (no OS keychain required)
 ```
 
 This is what you get out of the box: a local SQLite DB encrypted with AES-256-GCM, with the key stored in your OS keychain (or `PSST_PASSWORD` as a fallback in headless environments).
+
+Use `--key-backend sqlite` on machines without a keychain (e.g. Windows headless, Docker) — psst will prompt for a password on first use and store the encrypted key alongside the vault.
+
+```bash
+# Full example
+psst init --global --key-backend sqlite
+psst set API_KEY                       # prompts for password once, then value
+psst list
+psst run python app.py
+```
 
 ### AWS Secrets Manager
 
 When you're running on EC2 with an IAM role, or you want secrets shared across machines, use the AWS backend:
 
-```bash
-psst init --backend aws \
-  --aws-region us-east-1 \
-  --aws-prefix psst/            # optional, default "psst/"
-  # --aws-profile my-profile    # optional, uses default AWS cred chain otherwise
+```
+psst init --backend aws --aws-region us-east-1
+psst init --backend aws --aws-region us-east-1 --aws-prefix psst/
+psst init --backend aws --aws-region us-east-1 --aws-profile my-profile
 ```
 
 This writes a `config.json` into the vault directory:
@@ -105,6 +116,71 @@ From then on, every `psst set`, `psst get`, `psst list`, `psst run`, `psst SECRE
 **Multi-tenant safety:** psst tags every secret it creates with `psst:managed=true` and filters listings by that tag + your configured prefix, so it won't touch or list secrets in your AWS account that weren't created by psst.
 
 **Failure mode:** if AWS is unreachable, psst fails fast — it does not fall back to a local cache. No stale secrets.
+
+### REST API (psst-server)
+
+A lightweight alternative to heavy central secret stores (HashiCorp Vault, AWS Secrets Manager). Run `psst-server` — a single self-contained binary — on any machine, and point all your clients at it. No infrastructure, no cloud account, no agents to manage.
+
+Pair with [Tailscale](https://tailscale.com) or [WireGuard](https://www.wireguard.com) for secure access across machines without exposing the server to the internet — just use the VPN IP as the `--rest-url`.
+
+#### Server setup
+
+Deploy `psst-server` (ASP.NET Core, self-contained binary) on your server. Config lives at `~/.psst-server/appsettings.json`:
+
+```json
+{
+  "ApiKey": "your-api-key",
+  "DbPath": "/home/user/.psst-server/secrets.db",
+  "Urls": "http://0.0.0.0:5000"
+}
+```
+
+See [`server/README.md`](server/README.md) for build and deploy instructions.
+
+#### Client setup (proxy mode)
+
+```bash
+# Point all psst commands at the server (persists to ~/.psst/psst.json)
+psst proxy enable --rest-url http://192.168.1.10:5000 --api-key <key>
+
+# Verify
+psst proxy status
+```
+
+#### Daily use
+
+Once proxy is enabled, all commands work exactly as normal — they just hit the server:
+
+```bash
+psst set API_KEY secret123             # stored on server
+psst get API_KEY                       # retrieved from server
+psst list                              # list secrets on server
+psst list vaults                       # list vaults on server
+psst run python app.py                 # secrets injected from server
+
+# Vault namespacing
+psst --vault prod set DB_URL postgres://...
+psst prod list
+psst prod run ./deploy.sh
+```
+
+#### Toggle proxy on/off
+
+The URL and API key are always saved — disable/enable just toggles routing:
+
+```bash
+psst proxy disable    # fall back to local vaults
+psst proxy enable     # back to server (no need to re-enter url/key)
+psst proxy status     # show current state
+```
+
+**Server down?** Disable the proxy and use a local vault as a fallback — your credentials stay intact and re-enabling is one command when the server comes back.
+
+```bash
+psst proxy disable
+psst set API_KEY secret123    # stored locally while server is down
+psst proxy enable             # back to server when it's up
+```
 
 ---
 
@@ -139,49 +215,67 @@ That's it.
 
 ```bash
 psst set <NAME>               # Add/update secret (interactive)
+psst set <NAME> value         # Set inline
 psst set <NAME> --stdin       # Pipe value in (for scripts)
 psst get <NAME>               # View value (debugging only)
 psst list                     # List all secret names
 psst rm <NAME>                # Delete secret
-
-# Import/export
-psst import .env              # Import from .env file
-psst import --stdin           # Import from stdin
-psst import --from-env        # Import from environment variables
-psst export                   # Export to stdout (.env format)
-psst export --env-file .env   # Export to file
 ```
 
-### Environments
+Secret names are always stored uppercase — `psst set stripe_key` saves as `STRIPE_KEY`.
 
-Organize secrets by environment (dev/staging/prod):
+#### Array and object values
 
 ```bash
-psst init --env prod          # Create vault for "prod" environment
-psst --env prod set API_KEY   # Set secret in prod
-psst --env prod list          # List secrets in prod
-psst --env prod API_KEY -- curl https://api.example.com
-
-# List all environments
-psst list envs
+psst set HOSTS "[server1,server2,server3]"       # string array → JSON
+psst set WEIGHTS "[1, 2.5, 0.8]"                 # number array → JSON
+psst set CONFIG '{"host":"db","port":5432}'       # object → JSON
+psst set MIXED '[1, "hello", 12.8]'              # mixed types → JSON
 ```
 
-Environments are stored in `~/.psst/envs/<name>/vault.db`.
+Values that start with `[` or `{` are parsed and stored as compact JSON.
 
-You can also use the `PSST_ENV` environment variable:
+#### Import/Export
+
 ```bash
-export PSST_ENV=prod
-psst list                     # Uses prod environment
+psst import .env                        # Import from .env file
+psst import <vault> .env                # Import into specific vault
+psst import --stdin                     # Import from stdin
+psst import --from-env                  # Import from environment variables
+psst export                             # Export to stdout (.env format)
+psst export <vault>                     # Export specific vault to stdout
+psst export --env-file .env             # Export to file
+psst export <vault> --env-file .env     # Export specific vault to file
 ```
 
-**Note:** Existing vaults at `~/.psst/vault.db` continue to work as the "default" environment.
+### Vaults
+
+Organize secrets by project or environment:
+
+```bash
+psst init --vault prod        # Create vault named "prod"
+psst init --global            # Create global vault (~/.psst/)
+
+# Vault shorthand — two equivalent forms:
+psst prod list                # psst <vault> <cmd>
+psst list prod                # psst <cmd> <vault>  (list/export/import only)
+
+psst prod set API_KEY         # Set in prod vault
+psst prod run ./deploy.sh     # Run with prod secrets
+psst @prod list               # Force global vault lookup
+
+# List all vaults
+psst list vaults
+```
+
+Vaults are stored at `~/.psst/envs/<name>/` (global) or `.psst/envs/<name>/` (local).
 
 ### Global Flags
 
 All commands support:
 ```bash
 -g, --global                  # Use global vault (~/.psst/)
---env <name>                  # Use specific environment
+--vault <name>                # Use specific vault
 --tag <name>                  # Filter by tag (repeatable)
 --json                        # Structured JSON output
 -q, --quiet                   # Suppress output, use exit codes
