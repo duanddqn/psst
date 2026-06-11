@@ -195,14 +195,17 @@ export async function init(
   args: string[],
   options: OutputOptions = {},
 ): Promise<void> {
+  // Accept positional vault name: psst init <name> [flags]
+  const positionalName = args.find((a) => !a.startsWith("-"));
+  const env = options.env || positionalName || "default";
+
   if (options.restUrl) {
-    const vault = options.env ?? "default";
     const backend = new RestApiBackend({ url: options.restUrl.url, apiKey: options.restUrl.apiKey });
-    await backend.createVault(vault);
+    await backend.createVault(env);
     if (options.json) {
-      console.log(JSON.stringify({ success: true, vault, proxy: options.restUrl.url }));
+      console.log(JSON.stringify({ success: true, vault: env, proxy: options.restUrl.url }));
     } else if (!options.quiet) {
-      console.log(chalk.green("✓"), `Vault "${vault}" created on proxy (${options.restUrl.url})`);
+      console.log(chalk.green("✓"), `Vault "${env}" created on proxy (${options.restUrl.url})`);
     }
     return;
   }
@@ -221,8 +224,6 @@ export async function init(
     options.global || args.includes("--global") || args.includes("-g");
   const scope = isGlobal ? "global" : "local";
 
-  // Use environment from options, default to "default" for new vaults with --env flag
-  const env = options.env || "default";
   const vaultPath = Vault.getVaultPath(isGlobal, env);
 
   // Backend selection — default sqlite, opt into aws with --backend aws.
