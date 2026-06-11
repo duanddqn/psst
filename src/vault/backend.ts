@@ -31,7 +31,7 @@ export interface SecretHistoryRecord {
  * `BackendType` union in config.ts so callers can `switch` on the value
  * without importing both modules.
  */
-export type VaultBackendType = "sqlite" | "aws";
+export type VaultBackendType = "sqlite" | "aws" | "restapi";
 
 /**
  * Pluggable storage backend for secrets.

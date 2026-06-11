@@ -19,7 +19,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { errorMessage } from "../utils/errors.js";
 
-export type BackendType = "sqlite" | "aws";
+export type BackendType = "sqlite" | "aws" | "restapi";
 export type KeyBackendType = "keychain" | "sqlite";
 
 export interface AwsBackendConfig {
@@ -31,10 +31,16 @@ export interface AwsBackendConfig {
   profile?: string;
 }
 
+export interface RestApiBackendConfig {
+  url: string;
+  apiKey?: string;
+}
+
 export interface VaultConfig {
   backend: BackendType;
   keyBackend?: KeyBackendType;
   aws?: AwsBackendConfig;
+  restApi?: RestApiBackendConfig;
 }
 
 const CONFIG_FILE = "config.json";
@@ -116,9 +122,9 @@ function normalizeConfig(raw: unknown, configPath: string): VaultConfig {
   const obj = raw as Record<string, unknown>;
   const backend = obj.backend ?? "sqlite";
 
-  if (backend !== "sqlite" && backend !== "aws") {
+  if (backend !== "sqlite" && backend !== "aws" && backend !== "restapi") {
     throw new Error(
-      `Unknown backend "${String(backend)}" in ${configPath}. Expected "sqlite" or "aws".`,
+      `Unknown backend "${String(backend)}" in ${configPath}. Expected "sqlite", "aws", or "restapi".`,
     );
   }
 
@@ -163,6 +169,29 @@ function normalizeConfig(raw: unknown, configPath: string): VaultConfig {
     }
 
     result.aws = aws;
+  }
+
+  if (backend === "restapi") {
+    const rawRestApi = obj.restApi ?? {};
+    if (
+      typeof rawRestApi !== "object" ||
+      rawRestApi === null ||
+      Array.isArray(rawRestApi)
+    ) {
+      throw new Error(`restApi config must be a JSON object in ${configPath}`);
+    }
+    const raw = rawRestApi as Record<string, unknown>;
+    if (!raw.url || typeof raw.url !== "string") {
+      throw new Error(`restApi.url is required and must be a string in ${configPath}`);
+    }
+    const restApi: RestApiBackendConfig = { url: raw.url };
+    if (raw.apiKey !== undefined) {
+      if (typeof raw.apiKey !== "string") {
+        throw new Error(`restApi.apiKey must be a string in ${configPath}`);
+      }
+      restApi.apiKey = raw.apiKey;
+    }
+    result.restApi = restApi;
   }
 
   return result;

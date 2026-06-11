@@ -26,6 +26,10 @@ const KNOWN_INIT_FLAGS = new Set([
   "--aws-region",
   "--aws-prefix",
   "--aws-profile",
+  "--rest-url",
+  "--rest-api-key",
+  "--apitest",
+  "--vault",
   "--env",
   "--json",
   "--quiet", "-q",
@@ -63,8 +67,8 @@ function parseBackendFlag(args: string[]): BackendType | undefined {
   if (!value || value.startsWith("-")) {
     throw new Error("--backend requires a value (sqlite or aws)");
   }
-  if (value === "sqlite" || value === "aws") return value;
-  throw new Error(`Unknown --backend "${value}". Supported: sqlite, aws.`);
+  if (value === "sqlite" || value === "aws" || value === "restapi") return value;
+  throw new Error(`Unknown --backend "${value}". Supported: sqlite, aws, restapi.`);
 }
 
 function parseKeyBackendFlag(args: string[]): KeyBackendType | undefined {
@@ -270,6 +274,22 @@ export async function init(
     await ensureAwsSdk(options);
   }
 
+  let restApiConfig: RestApiBackendConfig | undefined;
+  if (backend === "restapi") {
+    const url = parseStringFlag(args, "--rest-url");
+    if (!url) {
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: "--rest-url is required for --backend restapi" }));
+      } else {
+        console.error(chalk.red("✗"), "--rest-url is required for --backend restapi");
+      }
+      process.exit(EXIT_USER_ERROR);
+    }
+    restApiConfig = { url };
+    const apiKey = parseStringFlag(args, "--rest-api-key");
+    if (apiKey) restApiConfig.apiKey = apiKey;
+  }
+
   // Check if already exists — look for either vault.db (sqlite) or
   // config.json (aws or future backends).
   const alreadyExists =
@@ -327,6 +347,7 @@ export async function init(
     keyBackend,
     keystorePassword,
     aws: awsConfig,
+    restApi: restApiConfig,
   });
 
   if (result.success) {
@@ -339,6 +360,7 @@ export async function init(
           scope,
           backend,
           ...(awsConfig ? { aws: awsConfig } : {}),
+          ...(restApiConfig ? { restApi: { url: restApiConfig.url } } : {}),
         }),
       );
       return;
@@ -360,6 +382,10 @@ export async function init(
         if (details.length > 0) {
           console.log(chalk.dim(`  AWS: ${details.join(", ")}`));
         }
+      }
+
+      if (backend === "restapi" && restApiConfig) {
+        console.log(chalk.dim(`  REST API: ${restApiConfig.url}`));
       }
 
       console.log();

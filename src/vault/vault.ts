@@ -30,6 +30,7 @@ import {
   type AwsBackendConfig,
   type BackendType,
   type KeyBackendType,
+  type RestApiBackendConfig,
   loadConfig,
   saveConfig,
   type VaultConfig,
@@ -66,6 +67,8 @@ export interface VaultOptions {
   keyBackend?: KeyBackendType;
   /** AWS backend settings. Only used when backend === "aws". */
   aws?: AwsBackendConfig;
+  /** REST API backend settings. Only used when backend === "restapi". */
+  restApi?: RestApiBackendConfig;
 }
 
 export class Vault {
@@ -80,22 +83,26 @@ export class Vault {
     // Resolve the backend choice and config.
     let backendType: BackendType;
     let awsConfig: AwsBackendConfig | undefined;
-
+    let restApiConfig: RestApiBackendConfig | undefined;
     let keyBackend: KeyBackendType | undefined;
 
     if (options?.backend) {
       backendType = options.backend;
       awsConfig = options.aws;
+      restApiConfig = options.restApi;
       keyBackend = options.keyBackend;
     } else {
       const fileConfig = this.tryLoadConfig();
       backendType = fileConfig?.backend ?? "sqlite";
       awsConfig = fileConfig?.aws ?? options?.aws;
+      restApiConfig = fileConfig?.restApi ?? options?.restApi;
       keyBackend = fileConfig?.keyBackend ?? options?.keyBackend;
     }
 
     if (backendType === "aws") {
       this.backend = new AwsBackend(awsConfig);
+    } else if (backendType === "restapi") {
+      this.backend = new RestApiBackend(restApiConfig!);
     } else {
       const sqlite = new SqliteBackend(vaultPath, {
         key: options?.key,
@@ -210,6 +217,7 @@ export class Vault {
       keyBackend?: KeyBackendType;
       keystorePassword?: string;
       aws?: AwsBackendConfig;
+      restApi?: RestApiBackendConfig;
     },
   ): Promise<{ success: boolean; error?: string }> {
     if (!existsSync(vaultPath)) {
@@ -223,6 +231,14 @@ export class Vault {
       if (!check.success) return check;
 
       saveConfig(vaultPath, { backend: "aws", aws: options?.aws ?? {} });
+      return { success: true };
+    }
+
+    if (backend === "restapi") {
+      const check = initializeRestApiVault(options?.restApi);
+      if (!check.success) return check;
+
+      saveConfig(vaultPath, { backend: "restapi", restApi: options?.restApi! });
       return { success: true };
     }
 
