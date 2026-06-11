@@ -35,6 +35,7 @@ import {
   type VaultConfig,
 } from "./config.js";
 import { initializeSqliteVault, SqliteBackend } from "./sqlite-backend.js";
+import { initializeRestApiVault, RestApiBackend } from "./restapi-backend.js";
 
 const VAULT_DIR_NAME = ".psst";
 const DB_NAME = "vault.db";
