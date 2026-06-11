@@ -382,6 +382,10 @@ async function main() {
           options.env = maybeVault;
           if (globalMatch && !localMatch) options.global = true;
           importArgs = importArgs.slice(1);
+        } else if (options.restUrl && importArgs.length > 1) {
+          // Proxy mode: treat first arg as vault name if a second arg (the file) follows
+          options.env = maybeVault;
+          importArgs = importArgs.slice(1);
         }
       }
 
