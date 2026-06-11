@@ -229,6 +229,10 @@ async function main() {
         options.global = true;
         options.env = first;
         cleanArgs.shift();
+      } else if (options.restUrl) {
+        // Proxy mode: vault exists on server, not locally — trust the name
+        options.env = first;
+        cleanArgs.shift();
       }
     }
   }
